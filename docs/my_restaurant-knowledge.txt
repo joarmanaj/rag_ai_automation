@@ -1,0 +1,11 @@
+Langflow is a visual framework for building AI applications.
+It allows users to connect blocks like document loaders, text splitters, embedding models, and vector databases.
+
+Retrieval-Augmented Generation (RAG) is a method that improves Large Language Models by giving them access to external knowledge sources.
+The process involves preparing data, splitting it into chunks, embedding the chunks, storing them in a vector database, and retrieving relevant chunks when a user asks a question.
+
+Chroma is a free and open-source vector database.
+It is often used with Langflow to store and retrieve document embeddings.
+
+Embeddings are numerical representations of text that capture meaning.
+They help the AI agent understand and compare pieces of information.
