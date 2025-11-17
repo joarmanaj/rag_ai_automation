@@ -1,17 +1,23 @@
 # ingest.py
-# -------------------------------
+# ----------------------------------------
 import os
-import glob
-import time
 import sys
+import time
 import logging
-from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings, OllamaEmbeddings
 from langchain_community.vectorstores import FAISS
+from langchain_community.document_loaders import (
+    TextLoader,
+    PyPDFLoader,
+    Docx2txtLoader,
+    UnstructuredMarkdownLoader,
+    CSVLoader,
+    UnstructuredHTMLLoader
+)
 
-# -------------------------------
-# STEP 1: Configure Logging
+# ----------------------------------------
+# Logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -21,87 +27,104 @@ logging.basicConfig(
     ]
 )
 
-# -------------------------------
-# STEP 2: Paths
-DATA_PATH = "./data"                  # Folder containing your .txt files
-DB_FAISS_PATH = "vectorstore.faiss"   # Name for FAISS vector database
+# ----------------------------------------
+# Folders to scan
+FOLDERS = ["docs", "data"]
+DB_FAISS_PATH = "vectorstore.faiss"
 
-# -------------------------------
-# STEP 3: Load Documents
-start_time = time.time()
-logging.info("Starting ingestion process...")
-logging.info(f"Scanning folder: {DATA_PATH}")
+# ----------------------------------------
+def load_all_documents():
+    documents = []
+    supported = [".txt", ".pdf", ".docx", ".md", ".csv", ".html"]
 
-files = glob.glob(os.path.join(DATA_PATH, "*.txt"))
-documents = []
+    for folder in FOLDERS:
+        if not os.path.exists(folder):
+            logging.warning(f"Folder not found: {folder}")
+            continue
 
-if not files:
-    logging.warning("No .txt files found in ./data. Please add at least one file and rerun.")
-    exit()
+        logging.info(f"Scanning: {folder}/")
 
-for file in files:
-    logging.info(f"Loading file: {file}")
-    try:
-        loader = TextLoader(file, encoding="utf-8")
-        loaded_docs = loader.load()
-        documents.extend(loaded_docs)
-        logging.info(f"Loaded {len(loaded_docs)} document(s) from {file}")
-    except Exception as e:
-        logging.error(f"Failed to load {file}: {e}")
+        for root, _, files in os.walk(folder):
+            for file in files:
+                ext = os.path.splitext(file)[1].lower()
+                file_path = os.path.join(root, file)
 
-logging.info(f"Total documents loaded: {len(documents)}")
+                if ext not in supported:
+                    logging.warning(f"Skipping unsupported file: {file_path}")
+                    continue
 
-# -------------------------------
-# STEP 4: Split Text
-logging.info("Splitting documents into smaller chunks...")
-split_start = time.time()
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-texts = text_splitter.split_documents(documents)
-logging.info(f"Split into {len(texts)} chunks in {time.time() - split_start:.2f}s")
+                logging.info(f"Loading: {file_path}")
 
-# -------------------------------
-# STEP 5: Create Embeddings (Toggle between Ollama / Hugging Face)
-logging.info("Generating embeddings...")
+                try:
+                    if ext == ".txt":
+                        loader = TextLoader(file_path, encoding="utf-8")
+                    elif ext == ".pdf":
+                        loader = PyPDFLoader(file_path)
+                    elif ext == ".docx":
+                        loader = Docx2txtLoader(file_path)
+                    elif ext == ".md":
+                        loader = UnstructuredMarkdownLoader(file_path)
+                    elif ext == ".csv":
+                        loader = CSVLoader(file_path)
+                    elif ext == ".html":
+                        loader = UnstructuredHTMLLoader(file_path)
 
-# Optional CLI toggle: python ingest.py huggingface OR python ingest.py ollama
-EMBEDDING_MODE = sys.argv[1] if len(sys.argv) > 1 else "huggingface"
-embed_start = time.time()
+                    docs = loader.load()
+                    documents.extend(docs)
 
-try:
-    if EMBEDDING_MODE.lower() == "huggingface":
-        model_name = "sentence-transformers/all-MiniLM-L6-v2"
-        logging.info(f"Using Hugging Face model: {model_name}")
-        embeddings = HuggingFaceEmbeddings(model_name=model_name)
+                except Exception as e:
+                    logging.error(f"Failed to load {file_path}: {e}")
 
-    elif EMBEDDING_MODE.lower() == "ollama":
-        model_name = "nomic-embed-text"
-        logging.info(f"Using Ollama model: {model_name}")
-        embeddings = OllamaEmbeddings(model=model_name)
+    return documents
+
+# ----------------------------------------
+def choose_embedding():
+    mode = sys.argv[1] if len(sys.argv) > 1 else "huggingface"
+    mode = mode.lower()
+
+    if mode == "huggingface":
+        model = "sentence-transformers/all-MiniLM-L6-v2"
+        logging.info(f"Using HuggingFace embeddings: {model}")
+        return HuggingFaceEmbeddings(model_name=model)
+
+    elif mode == "ollama":
+        model = "nomic-embed-text"
+        logging.info(f"Using Ollama embeddings: {model}")
+        return OllamaEmbeddings(model=model)
 
     else:
-        raise ValueError("Invalid EMBEDDING_MODE. Use 'huggingface' or 'ollama'.")
+        raise ValueError("Invalid mode. Use: huggingface OR ollama")
 
+# ----------------------------------------
+if __name__ == "__main__":
+    start = time.time()
+    logging.info("🚀 Starting ingestion...")
+
+    # Load docs
+    documents = load_all_documents()
+    logging.info(f"Total loaded documents: {len(documents)}")
+
+    if not documents:
+        logging.error("No supported files found in docs/ or data/. Exiting.")
+        sys.exit(1)
+
+    # Split text
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=100
+    )
+    texts = splitter.split_documents(documents)
+    logging.info(f"Created {len(texts)} text chunks.")
+
+    # Embeddings
+    embeddings = choose_embedding()
+
+    # Build vectorstore
     db = FAISS.from_documents(texts, embeddings)
-    logging.info(f"Embeddings created successfully using {EMBEDDING_MODE} in {time.time() - embed_start:.2f}s")
 
-except Exception as e:
-    logging.error(f"Embedding generation failed: {e}")
-    raise e
-
-# -------------------------------
-# STEP 6: Save FAISS
-logging.info("Saving embeddings into FAISS vector database...")
-save_start = time.time()
-
-try:
+    # Save vectorstore
     db.save_local(DB_FAISS_PATH)
-    logging.info(f"Vector database saved as '{DB_FAISS_PATH}' in {time.time() - save_start:.2f}s")
-except Exception as e:
-    logging.error(f"Failed to save FAISS vector database: {e}")
-    raise e
+    logging.info(f"💾 Saved FAISS vectorstore to {DB_FAISS_PATH}")
 
-# -------------------------------
-# STEP 7: Finish
-total_time = time.time() - start_time
-logging.info(f"Ingestion complete in {total_time:.2f} seconds!")
-logging.info("Your FAISS vectorstore is ready to use.")
+    total = time.time() - start
+    logging.info(f"✅ Ingestion completed in {total:.2f} seconds!")

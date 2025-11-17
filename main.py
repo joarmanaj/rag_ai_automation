@@ -1,11 +1,9 @@
-
 import os
 import logging
 import warnings
 import torch
-import atexit
 import traceback
-import gradio as gr
+from flask import Flask, request, jsonify
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -16,49 +14,28 @@ from langchain_community.llms import Ollama, HuggingFacePipeline
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from langchain.prompts import PromptTemplate
 
-# -------------------------------
-# Logging setup
+# ---------------------------------
+# Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# -------------------------------
-# Paths
 DB_FAISS_PATH = "vectorstore.faiss"
-READY_FLAG = "main_ready.flag"
 
 if not os.path.exists(DB_FAISS_PATH):
-    logging.error(f"FAISS database not found at '{DB_FAISS_PATH}'. Run ingest.py first!")
-    exit()
+    logging.error(f"FAISS database not found at '{DB_FAISS_PATH}'")
+    exit(1)
 
-# -------------------------------
+# ---------------------------------
 # Embeddings
 embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-# -------------------------------
+# ---------------------------------
 # Load FAISS
 db = FAISS.load_local(DB_FAISS_PATH, embeddings, allow_dangerous_deserialization=True)
 retriever = db.as_retriever(search_kwargs={"k": 3})
 logging.info("FAISS vectorstore loaded successfully")
 
-# -------------------------------
-# ✅ Signal backend ready
-try:
-    with open(READY_FLAG, "w") as f:
-        f.write("ready")
-    logging.info("✅ main_ready.flag created successfully — backend initialized.")
-except Exception as e:
-    logging.error(f"❌ Could not create main_ready.flag: {e}")
-
-# -------------------------------
-# Remove ready flag on exit
-def remove_ready_flag():
-    if os.path.exists(READY_FLAG):
-        os.remove(READY_FLAG)
-        logging.info("🧹 main_ready.flag removed on exit.")
-
-atexit.register(remove_ready_flag)
-
-# -------------------------------
-# Prompt template
+# ---------------------------------
+# Prompt
 prompt_template = PromptTemplate(
     input_variables=["context", "question"],
     template="""
@@ -76,103 +53,107 @@ Answer:
 """
 )
 
-# -------------------------------
-# Load LLM (Ollama → TinyLlama fallback)
+# ---------------------------------
+# Load LLM
 def load_llm():
     try:
-        logging.info("Trying Ollama Local...")
+        logging.info("Trying Ollama...")
         llm = Ollama(model="phi", base_url="http://127.0.0.1:11435")
-        _ = llm.invoke("Hello")  # sanity check
-        print("\n🤖 Using Ollama Local LLM\n")
-        logging.info("Ollama Local loaded successfully")
+        _ = llm.invoke("Hello")
+        logging.info("Using Ollama Local LLM")
         return llm
     except Exception as e:
-        logging.warning(f"Ollama Local failed: {e}")
+        logging.warning(f"Ollama failed: {e}")
 
     try:
-        logging.info("Loading TinyLlama 1.1B from Hugging Face...")
         model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
         tokenizer = AutoTokenizer.from_pretrained(model_id)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype=torch.float16,
-            device_map="auto"
-        )
+        model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16, device_map="auto")
         pipe = pipeline(
             "text-generation",
             model=model,
             tokenizer=tokenizer,
             max_new_tokens=200,
-            temperature=0.6,
-            top_p=0.9,
-            repetition_penalty=1.1,
-            device_map="auto"
+            temperature=0.6
         )
-        print("\n🤖 Ollama not available. Using TinyLlama 1.1B Chat model\n")
-        logging.info("TinyLlama loaded successfully")
+        logging.info("Using TinyLlama fallback")
         return HuggingFacePipeline(pipeline=pipe)
     except Exception as e:
-        logging.error(f"Failed to load TinyLlama: {e}")
-        exit("❌ No LLM available. Exiting...")
+        logging.error(f"TinyLlama failed: {e}")
+        exit("No LLM available.")
 
-# -------------------------------
-# Initialize Lazy LLM + RetrievalQA
-llm = None
-qa_chain = None
+llm = load_llm()
 
-def ensure_chain():
-    """Load LLM and RetrievalQA chain only once."""
-    global llm, qa_chain
-    if llm is None:
-        llm = load_llm()
-    if qa_chain is None:
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=llm,
-            retriever=retriever,
-            chain_type="stuff",
-            return_source_documents=False
-        )
-    return qa_chain
+qa_chain = RetrievalQA.from_chain_type(
+    llm=llm,
+    retriever=retriever,
+    chain_type="stuff",
+    return_source_documents=False
+)
 
-# -------------------------------
-# Gradio function
-def answer_question(user_query):
+# ---------------------------------
+# Flask API Backend
+app = Flask(__name__)
+
+# Simple /ask endpoint
+@app.post("/ask")
+def ask():
     try:
-        if not user_query.strip():
-            return "⚠️ Please enter a question."
+        data = request.get_json()
+        question = data.get("question", "")
 
-        qa = ensure_chain()
-        docs = retriever.get_relevant_documents(user_query)
+        if not question.strip():
+            return jsonify({"answer": "⚠️ Please enter a question."})
+
+        docs = retriever.get_relevant_documents(question)
         context_text = "\n".join([d.page_content for d in docs])
-        final_prompt = prompt_template.format(context=context_text, question=user_query)
+        final_prompt = prompt_template.format(context=context_text, question=question)
 
-        # Run query
         try:
-            response = qa.run(final_prompt)
-        except Exception:
-            result = qa.invoke({"query": final_prompt})
-            response = result.get("result", str(result))
+            response = qa_chain.run(final_prompt)
+        except:
+            result = qa_chain.invoke({"query": final_prompt})
+            response = result.get("result", "")
 
-        return response.strip() if response else "No answer generated."
+        return jsonify({"answer": response.strip()})
     except Exception as e:
         tb = traceback.format_exc()
-        logging.error(f"Error: {e}\n{tb}")
-        return f"❌ Error:\n{tb}"
+        logging.error(tb)
+        return jsonify({"answer": f"Error:\n{tb}"})
 
-# -------------------------------
-# Gradio UI
-css = """
-#chatbox { max-width: 900px; margin: auto; }
-"""
 
-with gr.Blocks(css=css, title="RAG AI Assistant") as demo:
-    gr.Markdown("## 🤖 RAG AI Assistant\nAsk questions about your ingested documents.")
-    with gr.Row():
-        query = gr.Textbox(label="Your Question", placeholder="Type a question...", lines=2)
-        submit_btn = gr.Button("Ask", variant="primary")
-    answer = gr.Textbox(label="Answer", lines=12)
-    submit_btn.click(fn=answer_question, inputs=query, outputs=answer)
-    query.submit(fn=answer_question, inputs=query, outputs=answer)
+# Chat-like endpoint for Streamlit with history
+chat_history = []
 
-print("🚀 Launching Gradio UI...")
-demo.launch(server_name="127.0.0.1", server_port=7860, share=False)
+@app.post("/chat")
+def chat():
+    try:
+        data = request.get_json()
+        question = data.get("question", "").strip()
+
+        if not question:
+            return jsonify({"answer": "⚠️ Please enter a question.", "history": chat_history})
+
+        docs = retriever.get_relevant_documents(question)
+        context_text = "\n".join([d.page_content for d in docs])
+        final_prompt = prompt_template.format(context=context_text, question=question)
+
+        try:
+            response = qa_chain.run(final_prompt)
+        except:
+            result = qa_chain.invoke({"query": final_prompt})
+            response = result.get("result", "")
+
+        response = response.strip()
+        chat_history.append({"question": question, "answer": response})
+
+        return jsonify({"answer": response, "history": chat_history})
+    except Exception as e:
+        tb = traceback.format_exc()
+        logging.error(tb)
+        return jsonify({"answer": f"Error:\n{tb}", "history": chat_history})
+
+
+if __name__ == "__main__":
+    logging.info("🚀 Backend running at http://127.0.0.1:5000")
+    app.run(host="127.0.0.1", port=5000)

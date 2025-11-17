@@ -1,19 +1,15 @@
-2025-11-09 06:55:49,133 [INFO] Starting ingestion process...
-2025-11-09 06:55:49,133 [INFO] Scanning folder: ./data
-2025-11-09 06:55:49,135 [INFO] Loading file: ./data\my_knowledge.txt
-2025-11-09 06:55:49,136 [INFO] Loaded 1 document(s) from ./data\my_knowledge.txt
-2025-11-09 06:55:49,136 [INFO] Total documents loaded: 1
-2025-11-09 06:55:49,136 [INFO] Splitting documents into smaller chunks...
-2025-11-09 06:55:49,136 [INFO] Split into 2 chunks in 0.00s
-2025-11-09 06:55:49,137 [INFO] Generating embeddings...
-2025-11-09 06:55:49,137 [INFO] Using Hugging Face model: sentence-transformers/all-MiniLM-L6-v2
-2025-11-09 06:56:03,801 [INFO] Load pretrained SentenceTransformer: sentence-transformers/all-MiniLM-L6-v2
-2025-11-09 06:56:08,466 [INFO] Use pytorch device_name: cpu
-2025-11-09 06:56:08,591 [INFO] Loading faiss with AVX2 support.
-2025-11-09 06:56:08,629 [INFO] Successfully loaded faiss with AVX2 support.
-2025-11-09 06:56:08,644 [INFO] Failed to load GPU Faiss: name 'GpuIndexIVFFlat' is not defined. Will not load constructor refs for GPU indexes. This is only an error if you're trying to use GPU Faiss.
-2025-11-09 06:56:08,646 [INFO] Embeddings created successfully using huggingface in 19.51s
-2025-11-09 06:56:08,646 [INFO] Saving embeddings into FAISS vector database...
-2025-11-09 06:56:08,651 [INFO] Vector database saved as 'vectorstore.faiss' in 0.00s
-2025-11-09 06:56:08,651 [INFO] Ingestion complete in 19.52 seconds!
-2025-11-09 06:56:08,652 [INFO] Your FAISS vectorstore is ready to use.
+2025-11-17 00:22:10,760 [INFO] 🚀 Starting ingestion...
+2025-11-17 00:22:10,761 [INFO] Scanning: docs/
+2025-11-17 00:22:10,761 [INFO] Loading: docs\my_restaurant-knowledge.txt
+2025-11-17 00:22:10,778 [INFO] Scanning: data/
+2025-11-17 00:22:10,778 [INFO] Loading: data\my_knowledge.txt
+2025-11-17 00:22:10,781 [INFO] Total loaded documents: 2
+2025-11-17 00:22:10,782 [INFO] Created 4 text chunks.
+2025-11-17 00:22:10,782 [INFO] Using HuggingFace embeddings: sentence-transformers/all-MiniLM-L6-v2
+2025-11-17 00:22:20,417 [INFO] Load pretrained SentenceTransformer: sentence-transformers/all-MiniLM-L6-v2
+2025-11-17 00:22:25,018 [INFO] Use pytorch device_name: cpu
+2025-11-17 00:22:26,302 [INFO] Loading faiss with AVX2 support.
+2025-11-17 00:22:26,335 [INFO] Successfully loaded faiss with AVX2 support.
+2025-11-17 00:22:26,349 [INFO] Failed to load GPU Faiss: name 'GpuIndexIVFFlat' is not defined. Will not load constructor refs for GPU indexes. This is only an error if you're trying to use GPU Faiss.
+2025-11-17 00:22:26,358 [INFO] 💾 Saved FAISS vectorstore to vectorstore.faiss
+2025-11-17 00:22:26,359 [INFO] ✅ Ingestion completed in 15.60 seconds!
