@@ -3,6 +3,7 @@ import logging
 import warnings
 import torch
 import traceback
+import subprocess
 from flask import Flask, request, jsonify
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -20,9 +21,16 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 DB_FAISS_PATH = "vectorstore.faiss"
 
+# ---------------------------------
+# Run ingest.py automatically if FAISS database is missing
 if not os.path.exists(DB_FAISS_PATH):
-    logging.error(f"FAISS database not found at '{DB_FAISS_PATH}'")
-    exit(1)
+    logging.info("FAISS database not found. Running ingest.py...")
+    try:
+        subprocess.run(["python", "ingest.py"], check=True)
+        logging.info("✅ ingest.py completed successfully.")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"❌ ingest.py failed: {e}")
+        exit(1)
 
 # ---------------------------------
 # Embeddings
@@ -35,7 +43,7 @@ retriever = db.as_retriever(search_kwargs={"k": 3})
 logging.info("FAISS vectorstore loaded successfully")
 
 # ---------------------------------
-# Prompt
+# Prompt template
 prompt_template = PromptTemplate(
     input_variables=["context", "question"],
     template="""
@@ -68,7 +76,11 @@ def load_llm():
     try:
         model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
         tokenizer = AutoTokenizer.from_pretrained(model_id)
-        model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16, device_map="auto")
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16,
+            device_map="auto"
+        )
         pipe = pipeline(
             "text-generation",
             model=model,
@@ -121,7 +133,6 @@ def ask():
         logging.error(tb)
         return jsonify({"answer": f"Error:\n{tb}"})
 
-
 # Chat-like endpoint for Streamlit with history
 chat_history = []
 
@@ -152,7 +163,6 @@ def chat():
         tb = traceback.format_exc()
         logging.error(tb)
         return jsonify({"answer": f"Error:\n{tb}", "history": chat_history})
-
 
 if __name__ == "__main__":
     logging.info("🚀 Backend running at http://127.0.0.1:5000")
