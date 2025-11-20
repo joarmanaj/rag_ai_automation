@@ -1,13 +1,12 @@
 
+
+flask>=2.2,<2.4
+torch==2.2.0
+sentence-transformers>=2.2,<2.3
+faiss-cpu==1.7.4
+numpy>=1.25,<1.27
+python-dotenv>=1.0,<1.1
 langchain-ollama==1.0.0
 llama-index==0.14.6
-sentence-transformers==2.2.2
-torch==2.2.0
-faiss-cpu==1.7.4
-numpy==1.26.4
-python-dotenv==1.0.1
 langchain-community==0.4.1
 langchain-text-splitters==1.0.0
-flask==2.3.4
-streamlit==1.27.0
-gunicorn==21.2.0
