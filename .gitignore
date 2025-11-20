@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+venv_rag/
+models/
+vectorstore.faiss/
+*.safetensors
+*.log
+ngrok.exe
+.vscode/
+.idea/

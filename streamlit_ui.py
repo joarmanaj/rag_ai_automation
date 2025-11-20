@@ -1,9 +1,28 @@
 # streamlit_ui.py
 import streamlit as st
 import requests
+import webbrowser
+import time
 
+# -----------------------------
+# Ngrok URL (dynamic display)
+public_url = "Ngrok tunnel not active"
+try:
+    from pyngrok import conf, ngrok
+    conf.get_default().ngrok_path = r"C:\Users\HP\RAG_AI_AUTOMATION\ngrok.exe"
+    tunnels = ngrok.get_tunnels()
+    if tunnels:
+        public_url = tunnels[0].public_url
+        # Open the Ngrok URL in browser (only once)
+        webbrowser.open(public_url)
+        time.sleep(1)  # brief pause to ensure browser opens
+except Exception as e:
+    public_url = f"Ngrok error: {e}"
+
+# -----------------------------
 st.set_page_config(page_title="RAG AI Assistant", layout="wide")
 st.title("🤖 RAG AI Assistant")
+st.markdown(f"**Public Ngrok URL:** {public_url}")
 st.markdown("Ask questions about your ingested documents.")
 
 # Initialize chat history in session state
