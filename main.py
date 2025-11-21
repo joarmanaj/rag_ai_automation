@@ -28,21 +28,30 @@ DB_FAISS_PATH = "vectorstore.faiss"
 if not os.path.exists(DB_FAISS_PATH):
     logging.info("FAISS database not found. Running ingest.py...")
     try:
-        subprocess.run(["python", "ingest.py"], check=True)
+        subprocess.run([os.environ.get("PYTHON", "python"), "ingest.py"], check=True)
         logging.info("ingest.py completed successfully.")
     except subprocess.CalledProcessError as e:
         logging.error(f"ingest.py failed: {e}")
-        exit(1)
+        # Don't crash here; depending on your preference you can exit(1) instead.
+        # exit(1)
 
 # ---------------------------------
 # Embeddings
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+try:
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+except Exception as e:
+    logging.error(f"Failed to initialize embeddings: {e}")
+    raise
 
 # ---------------------------------
 # Load FAISS
-db = FAISS.load_local(DB_FAISS_PATH, embeddings, allow_dangerous_deserialization=True)
-retriever = db.as_retriever(search_kwargs={"k": 3})
-logging.info("FAISS vectorstore loaded successfully")
+try:
+    db = FAISS.load_local(DB_FAISS_PATH, embeddings, allow_dangerous_deserialization=True)
+    retriever = db.as_retriever(search_kwargs={"k": 3})
+    logging.info("FAISS vectorstore loaded successfully")
+except Exception as e:
+    logging.error(f"Failed to load FAISS vectorstore from '{DB_FAISS_PATH}': {e}")
+    raise
 
 # ---------------------------------
 # Prompt template
@@ -64,61 +73,57 @@ Answer:
 )
 
 # ---------------------------------
-# Load LLM (Phi-2 offline first, then TinyLlama, then Ollama)
+# Load LLM (Offline models in ./models first, then Ollama)
 def load_llm():
-    # Attempt Phi-2 offline
-    try:
-        model_path = r"C:\Users\HP\RAG_AI_AUTOMATION\models\phi-2"
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            device_map="auto",
-            torch_dtype=torch.float16
-        )
-        pipe = pipeline(
-            "text-generation",
-            model=model,
-            tokenizer=tokenizer,
-            max_new_tokens=200,
-            temperature=0.6
-        )
-        logging.info("Using Phi-2 offline")
-        return HuggingFacePipeline(pipeline=pipe)
-    except Exception as e:
-        logging.warning(f"Phi-2 offline failed: {e}")
+    # Helper to select torch dtype & device for CPU-safe operation
+    def preferred_dtype_and_device():
+        has_cuda = torch.cuda.is_available()
+        if has_cuda:
+            return torch.float16, "cuda"
+        return torch.float32, "cpu"
 
-    # Attempt TinyLlama offline
-    try:
-        model_path = r"C:\Users\HP\RAG_AI_AUTOMATION\models\tinyllama"
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            device_map="auto",
-            torch_dtype=torch.float16
-        )
-        pipe = pipeline(
-            "text-generation",
-            model=model,
-            tokenizer=tokenizer,
-            max_new_tokens=200,
-            temperature=0.6
-        )
-        logging.info("Using TinyLlama offline")
-        return HuggingFacePipeline(pipeline=pipe)
-    except Exception as e:
-        logging.warning(f"TinyLlama offline failed: {e}")
+    dtype, device = preferred_dtype_and_device()
 
-    # Fallback to Ollama
+    # Try offline models located under ./models/<name>
+    offline_candidates = ["phi-2", "tinyllama"]
+    for model_name in offline_candidates:
+        model_path = os.path.join("models", model_name)
+        if os.path.exists(model_path):
+            try:
+                logging.info(f"Attempting offline model at: {model_path}")
+                tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
+                # Load model in a CPU-friendly way (avoid device_map="auto" on CPU-only machines)
+                model = AutoModelForCausalLM.from_pretrained(model_path, local_files_only=True)
+                if device == "cpu":
+                    model.to("cpu")
+                pipe = pipeline(
+                    "text-generation",
+                    model=model,
+                    tokenizer=tokenizer,
+                    device=0 if device == "cuda" else -1,
+                    max_new_tokens=200,
+                    temperature=0.6
+                )
+                logging.info(f"Using offline model: {model_name}")
+                return HuggingFacePipeline(pipeline=pipe)
+            except Exception as e:
+                logging.warning(f"Offline model '{model_name}' failed to load: {e}")
+
+    # Fallback to Ollama (local Ollama server)
     try:
-        logging.info("Trying Ollama...")
+        logging.info("Attempting Ollama (local) fallback...")
         llm = Ollama(model="phi", base_url="http://127.0.0.1:11435")
+        # quick sanity check
         _ = llm.invoke("Hello")
         logging.info("Using Ollama Local LLM")
         return llm
     except Exception as e:
-        logging.error(f"No LLM available: {e}")
-        exit("No LLM could be loaded.")
+        logging.warning(f"Ollama fallback failed or is unavailable: {e}")
 
+    # If all fails — raise an informative error
+    raise RuntimeError("No LLM could be loaded. Provide an offline model under ./models or run Ollama locally.")
+
+# Load LLM (this may raise if no model available)
 llm = load_llm()
 
 qa_chain = RetrievalQA.from_chain_type(
@@ -138,19 +143,22 @@ chat_history = []
 
 def log_interaction(question, answer):
     chat_history.append({"question": question, "answer": answer})
-    with open("logs.csv", "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow([datetime.now(), question, answer])
+    try:
+        with open("logs.csv", "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([datetime.now(), question, answer])
+    except Exception as e:
+        logging.warning(f"Failed to write logs.csv: {e}")
 
 # ---------------------------------
 # /ask endpoint
 @app.post("/ask")
 def ask():
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         question = data.get("question", "").strip()
         if not question:
-            return jsonify({"answer": "Please enter a question."})
+            return jsonify({"answer": "Please enter a question."}), 400
 
         docs = retriever.get_relevant_documents(question)
         context_text = "\n".join([d.page_content for d in docs])
@@ -158,7 +166,7 @@ def ask():
 
         try:
             response = qa_chain.run(final_prompt)
-        except:
+        except Exception:
             result = qa_chain.invoke({"query": final_prompt})
             response = result.get("result", "")
 
@@ -168,17 +176,17 @@ def ask():
     except Exception as e:
         tb = traceback.format_exc()
         logging.error(tb)
-        return jsonify({"answer": f"Error:\n{tb}"})
+        return jsonify({"answer": f"Error:\n{tb}"}), 500
 
 # ---------------------------------
 # /chat endpoint for Streamlit
 @app.post("/chat")
 def chat():
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         question = data.get("question", "").strip()
         if not question:
-            return jsonify({"answer": "Please enter a question.", "history": chat_history})
+            return jsonify({"answer": "Please enter a question.", "history": chat_history}), 400
 
         docs = retriever.get_relevant_documents(question)
         context_text = "\n".join([d.page_content for d in docs])
@@ -186,7 +194,7 @@ def chat():
 
         try:
             response = qa_chain.run(final_prompt)
-        except:
+        except Exception:
             result = qa_chain.invoke({"query": final_prompt})
             response = result.get("result", "")
 
@@ -196,9 +204,10 @@ def chat():
     except Exception as e:
         tb = traceback.format_exc()
         logging.error(tb)
-        return jsonify({"answer": f"Error:\n{tb}", "history": chat_history})
+        return jsonify({"answer": f"Error:\n{tb}", "history": chat_history}), 500
 
 # ---------------------------------
 if __name__ == "__main__":
-    logging.info("Backend running on 0.0.0.0:5000")
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    logging.info(f"Backend running on 0.0.0.0:{port}")
+    app.run(host="0.0.0.0", port=port)
