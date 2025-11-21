@@ -4,7 +4,6 @@ import torch
 import traceback
 import subprocess
 from flask import Flask, request, jsonify
-from pyngrok import ngrok, conf
 from datetime import datetime
 import csv
 import logging
@@ -30,9 +29,9 @@ if not os.path.exists(DB_FAISS_PATH):
     logging.info("FAISS database not found. Running ingest.py...")
     try:
         subprocess.run(["python", "ingest.py"], check=True)
-        logging.info(" ingest.py completed successfully.")
+        logging.info("ingest.py completed successfully.")
     except subprocess.CalledProcessError as e:
-        logging.error(f" ingest.py failed: {e}")
+        logging.error(f"ingest.py failed: {e}")
         exit(1)
 
 # ---------------------------------
@@ -83,7 +82,7 @@ def load_llm():
             max_new_tokens=200,
             temperature=0.6
         )
-        logging.info(" Using Phi-2 offline")
+        logging.info("Using Phi-2 offline")
         return HuggingFacePipeline(pipeline=pipe)
     except Exception as e:
         logging.warning(f"Phi-2 offline failed: {e}")
@@ -104,7 +103,7 @@ def load_llm():
             max_new_tokens=200,
             temperature=0.6
         )
-        logging.info(" Using TinyLlama offline")
+        logging.info("Using TinyLlama offline")
         return HuggingFacePipeline(pipeline=pipe)
     except Exception as e:
         logging.warning(f"TinyLlama offline failed: {e}")
@@ -114,7 +113,7 @@ def load_llm():
         logging.info("Trying Ollama...")
         llm = Ollama(model="phi", base_url="http://127.0.0.1:11435")
         _ = llm.invoke("Hello")
-        logging.info(" Using Ollama Local LLM")
+        logging.info("Using Ollama Local LLM")
         return llm
     except Exception as e:
         logging.error(f"No LLM available: {e}")
@@ -134,16 +133,6 @@ qa_chain = RetrievalQA.from_chain_type(
 app = Flask(__name__)
 
 # ---------------------------------
-# Ngrok setup
-try:
-    conf.get_default().ngrok_path = r"C:\Users\HP\RAG_AI_AUTOMATION\ngrok.exe"
-    public_url = ngrok.connect(5000)
-    logging.info(f" Public API URL: {public_url}")
-except Exception as e:
-    logging.warning(f"Ngrok tunnel failed: {e}")
-    public_url = "http://127.0.0.1:5000"
-
-# ---------------------------------
 # Chat history and logging
 chat_history = []
 
@@ -161,7 +150,7 @@ def ask():
         data = request.get_json()
         question = data.get("question", "").strip()
         if not question:
-            return jsonify({"answer": " Please enter a question."})
+            return jsonify({"answer": "Please enter a question."})
 
         docs = retriever.get_relevant_documents(question)
         context_text = "\n".join([d.page_content for d in docs])
@@ -189,7 +178,7 @@ def chat():
         data = request.get_json()
         question = data.get("question", "").strip()
         if not question:
-            return jsonify({"answer": " Please enter a question.", "history": chat_history})
+            return jsonify({"answer": "Please enter a question.", "history": chat_history})
 
         docs = retriever.get_relevant_documents(question)
         context_text = "\n".join([d.page_content for d in docs])
@@ -211,5 +200,5 @@ def chat():
 
 # ---------------------------------
 if __name__ == "__main__":
-    logging.info(f" Backend running at {public_url}")
+    logging.info("Backend running on 0.0.0.0:5000")
     app.run(host="0.0.0.0", port=5000)
