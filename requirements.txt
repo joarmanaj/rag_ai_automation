@@ -1,21 +1,11 @@
-# Core RAG packages
-langchain==0.3.7
-langchain-community==0.3.7
-langchain-core==0.3.15
-langchain-text-splitters==0.3.2
-langchain-ollama==0.2.2
-
-llama-index==0.10.55
-
-# Embeddings & vector DB
-sentence-transformers==2.6.1
+Flask==3.0.3
+gunicorn==21.2.0
+langchain==0.2.3
+langchain-community==0.2.1
 faiss-cpu==1.7.4
+sentence-transformers==2.5.1
+transformers==4.40.1
 torch==2.2.2
 numpy==1.26.4
-
-# Web framework & API
-flask==2.3.3
-gunicorn==21.2.0
-
-# Environment & utilities
-python-dotenv==1.0.1
+huggingface-hub==0.23.0
+accelerate==0.30.1

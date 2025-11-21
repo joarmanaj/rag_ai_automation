@@ -26,21 +26,19 @@ DB_FAISS_PATH = "vectorstore.faiss"
 # ---------------------------------
 # Run ingest.py automatically if FAISS database is missing
 if not os.path.exists(DB_FAISS_PATH):
-    logging.info("FAISS database not found. Running ingest.py...")
+    logging.info("FAISS not found. Running ingest.py...")
     try:
-        subprocess.run([os.environ.get("PYTHON", "python"), "ingest.py"], check=True)
-        logging.info("ingest.py completed successfully.")
-    except subprocess.CalledProcessError as e:
+        subprocess.run(["python", "ingest.py"], check=True)
+        logging.info("ingest.py completed.")
+    except Exception as e:
         logging.error(f"ingest.py failed: {e}")
-        # Don't crash here; depending on your preference you can exit(1) instead.
-        # exit(1)
 
 # ---------------------------------
 # Embeddings
 try:
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 except Exception as e:
-    logging.error(f"Failed to initialize embeddings: {e}")
+    logging.error(f"Embedding init failed: {e}")
     raise
 
 # ---------------------------------
@@ -48,19 +46,19 @@ except Exception as e:
 try:
     db = FAISS.load_local(DB_FAISS_PATH, embeddings, allow_dangerous_deserialization=True)
     retriever = db.as_retriever(search_kwargs={"k": 3})
-    logging.info("FAISS vectorstore loaded successfully")
+    logging.info("FAISS loaded successfully.")
 except Exception as e:
-    logging.error(f"Failed to load FAISS vectorstore from '{DB_FAISS_PATH}': {e}")
+    logging.error(f"FAISS load error: {e}")
     raise
 
 # ---------------------------------
-# Prompt template
+# Prompt Template
 prompt_template = PromptTemplate(
     input_variables=["context", "question"],
     template="""
-You are a smart, concise, and friendly AI assistant.
-Use the context below to answer naturally and clearly, like a human.
-If the context doesn't have the answer, say you don't have enough information.
+You are a smart, concise, friendly AI assistant.
+Use the context below to answer clearly.
+If the context does not contain the answer, say so.
 
 Context:
 {context}
@@ -73,57 +71,43 @@ Answer:
 )
 
 # ---------------------------------
-# Load LLM (Offline models in ./models first, then Ollama)
+# Load LLM (offline first, then Ollama)
 def load_llm():
-    # Helper to select torch dtype & device for CPU-safe operation
-    def preferred_dtype_and_device():
-        has_cuda = torch.cuda.is_available()
-        if has_cuda:
-            return torch.float16, "cuda"
-        return torch.float32, "cpu"
+    try_models = ["phi-2", "tinyllama"]
 
-    dtype, device = preferred_dtype_and_device()
-
-    # Try offline models located under ./models/<name>
-    offline_candidates = ["phi-2", "tinyllama"]
-    for model_name in offline_candidates:
+    for model_name in try_models:
         model_path = os.path.join("models", model_name)
         if os.path.exists(model_path):
             try:
-                logging.info(f"Attempting offline model at: {model_path}")
+                logging.info(f"Loading offline model: {model_name}")
                 tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
-                # Load model in a CPU-friendly way (avoid device_map="auto" on CPU-only machines)
                 model = AutoModelForCausalLM.from_pretrained(model_path, local_files_only=True)
-                if device == "cpu":
-                    model.to("cpu")
                 pipe = pipeline(
                     "text-generation",
                     model=model,
                     tokenizer=tokenizer,
-                    device=0 if device == "cuda" else -1,
+                    device=-1,
                     max_new_tokens=200,
                     temperature=0.6
                 )
-                logging.info(f"Using offline model: {model_name}")
                 return HuggingFacePipeline(pipeline=pipe)
             except Exception as e:
-                logging.warning(f"Offline model '{model_name}' failed to load: {e}")
+                logging.warning(f"Offline model failed: {e}")
 
-    # Fallback to Ollama (local Ollama server)
+    # No offline model → TRY OLLAMA
     try:
-        logging.info("Attempting Ollama (local) fallback...")
+        logging.info("Trying Ollama fallback...")
         llm = Ollama(model="phi", base_url="http://127.0.0.1:11435")
-        # quick sanity check
-        _ = llm.invoke("Hello")
-        logging.info("Using Ollama Local LLM")
+        llm.invoke("Hello")
         return llm
-    except Exception as e:
-        logging.warning(f"Ollama fallback failed or is unavailable: {e}")
+    except Exception:
+        logging.warning("Ollama not available.")
 
-    # If all fails — raise an informative error
-    raise RuntimeError("No LLM could be loaded. Provide an offline model under ./models or run Ollama locally.")
+    # Nothing works → fail clearly
+    raise RuntimeError(
+        "No LLM available. Upload an offline model into /models OR run Ollama locally."
+    )
 
-# Load LLM (this may raise if no model available)
 llm = load_llm()
 
 qa_chain = RetrievalQA.from_chain_type(
@@ -134,21 +118,18 @@ qa_chain = RetrievalQA.from_chain_type(
 )
 
 # ---------------------------------
-# Flask API Backend
+# Flask Backend
 app = Flask(__name__)
 
-# ---------------------------------
-# Chat history and logging
 chat_history = []
 
-def log_interaction(question, answer):
-    chat_history.append({"question": question, "answer": answer})
+def log_interaction(q, a):
+    chat_history.append({"question": q, "answer": a})
     try:
         with open("logs.csv", "a", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow([datetime.now(), question, answer])
+            csv.writer(f).writerow([datetime.now(), q, a])
     except Exception as e:
-        logging.warning(f"Failed to write logs.csv: {e}")
+        logging.warning(f"logs.csv write failed: {e}")
 
 # ---------------------------------
 # /ask endpoint
@@ -157,51 +138,57 @@ def ask():
     try:
         data = request.get_json() or {}
         question = data.get("question", "").strip()
+
         if not question:
             return jsonify({"answer": "Please enter a question."}), 400
 
         docs = retriever.get_relevant_documents(question)
-        context_text = "\n".join([d.page_content for d in docs])
-        final_prompt = prompt_template.format(context=context_text, question=question)
+        context = "\n".join([d.page_content for d in docs])
+
+        final_prompt = prompt_template.format(context=context, question=question)
 
         try:
-            response = qa_chain.run(final_prompt)
+            answer = qa_chain.run(final_prompt)
         except Exception:
             result = qa_chain.invoke({"query": final_prompt})
-            response = result.get("result", "")
+            answer = result.get("result", "")
 
-        response = response.strip()
-        log_interaction(question, response)
-        return jsonify({"answer": response})
+        answer = answer.strip()
+        log_interaction(question, answer)
+
+        return jsonify({"answer": answer})
     except Exception as e:
         tb = traceback.format_exc()
         logging.error(tb)
         return jsonify({"answer": f"Error:\n{tb}"}), 500
 
 # ---------------------------------
-# /chat endpoint for Streamlit
+# /chat endpoint
 @app.post("/chat")
 def chat():
     try:
         data = request.get_json() or {}
         question = data.get("question", "").strip()
+
         if not question:
             return jsonify({"answer": "Please enter a question.", "history": chat_history}), 400
 
         docs = retriever.get_relevant_documents(question)
-        context_text = "\n".join([d.page_content for d in docs])
-        final_prompt = prompt_template.format(context=context_text, question=question)
+        context = "\n".join([d.page_content for d in docs])
+
+        final_prompt = prompt_template.format(context=context, question=question)
 
         try:
-            response = qa_chain.run(final_prompt)
+            answer = qa_chain.run(final_prompt)
         except Exception:
             result = qa_chain.invoke({"query": final_prompt})
-            response = result.get("result", "")
+            answer = result.get("result", "")
 
-        response = response.strip()
-        log_interaction(question, response)
-        return jsonify({"answer": response, "history": chat_history})
-    except Exception as e:
+        answer = answer.strip()
+        log_interaction(question, answer)
+
+        return jsonify({"answer": answer, "history": chat_history})
+    except Exception:
         tb = traceback.format_exc()
         logging.error(tb)
         return jsonify({"answer": f"Error:\n{tb}", "history": chat_history}), 500
