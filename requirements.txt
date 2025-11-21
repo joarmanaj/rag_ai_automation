@@ -1,19 +1,21 @@
 # Core RAG packages
-langchain>=0.1.0,<1.0
-langchain-ollama>=1.0.0
-langchain-community>=0.4.1
-langchain-text-splitters>=1.0.0
-llama-index>=0.14.6
+langchain==0.3.7
+langchain-community==0.3.7
+langchain-core==0.3.15
+langchain-text-splitters==0.3.2
+langchain-ollama==0.2.2
+
+llama-index==0.10.55
 
 # Embeddings & vector DB
-sentence-transformers>=2.2,<3.0
-faiss-cpu>=1.11,<2.0
-torch>=2.9,<3.0
-numpy>=1.26,<1.27
+sentence-transformers==2.6.1
+faiss-cpu==1.7.4
+torch==2.2.2
+numpy==1.26.4
 
 # Web framework & API
-flask>=2.2,<2.4
-gunicorn>=21.2,<22.0
+flask==2.3.3
+gunicorn==21.2.0
 
 # Environment & utilities
-python-dotenv>=1.0,<2.0
+python-dotenv==1.0.1
