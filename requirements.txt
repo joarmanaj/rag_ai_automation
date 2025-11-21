@@ -1,24 +1,19 @@
-
-
 # Core RAG packages
 langchain>=0.1.0,<1.0
-langchain-ollama==1.0.0
-langchain-community==0.4.1
-langchain-text-splitters==1.0.0
-llama-index==0.14.6
+langchain-ollama>=1.0.0
+langchain-community>=0.4.1
+langchain-text-splitters>=1.0.0
+llama-index>=0.14.6
 
 # Embeddings & vector DB
-sentence-transformers>=2.2,<2.3
-faiss-cpu==1.7.4
-torch==2.2.0
-numpy>=1.25,<1.27
+sentence-transformers>=2.2
+faiss-cpu>=1.9
+torch>=2.6
+numpy>=1.25
 
 # Web framework & API
 flask>=2.2,<2.4
-gunicorn==21.2.0  # pin a stable version compatible with Flask
+gunicorn>=21.2.0
 
 # Environment & utilities
-python-dotenv>=1.0,<1.1
-
-# Optional: logging & dev tools
-# logging is built-in, pyngrok removed for Render deployment
+python-dotenv>=1.0
