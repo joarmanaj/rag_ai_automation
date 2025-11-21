@@ -6,14 +6,14 @@ langchain-text-splitters>=1.0.0
 llama-index>=0.14.6
 
 # Embeddings & vector DB
-sentence-transformers>=2.2
-faiss-cpu>=1.9
-torch>=2.6
-numpy>=1.25
+sentence-transformers>=2.2,<3.0
+faiss-cpu>=1.11,<2.0
+torch>=2.9,<3.0
+numpy>=1.26,<1.27
 
 # Web framework & API
 flask>=2.2,<2.4
-gunicorn>=21.2.0
+gunicorn>=21.2,<22.0
 
 # Environment & utilities
-python-dotenv>=1.0
+python-dotenv>=1.0,<2.0
