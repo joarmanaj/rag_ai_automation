@@ -73,7 +73,7 @@ Answer:
 # ---------------------------------
 # Load LLM (offline first, then Ollama)
 def load_llm():
-    try_models = ["phi-2", "tinyllama"]
+    try_models = ["phi-2", "tinyllama", "tinyllama_new"]
 
     for model_name in try_models:
         model_path = os.path.join("models", model_name)
