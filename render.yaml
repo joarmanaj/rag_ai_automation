@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: rag-backend
+    env: python
+    rootDir: ./
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn main:app --bind 0.0.0.0:$PORT --timeout 120
+
+  - type: web
+    name: rag-ui
+    env: python
+    rootDir: ./streamlit
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
